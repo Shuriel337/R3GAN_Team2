@@ -86,7 +86,7 @@ def modulated_conv2d(
 #----------------------------------------------------------------------------
 
 @persistence.persistent_class
-# class FullyConnectedLayer(torch.nn.Module):
+# class FullyConnectedLayer(torch.nn.Module): #equalized learning rate 제거
 #     def __init__(self,
 #         in_features,                # Number of input features.
 #         out_features,               # Number of output features.
@@ -142,7 +142,7 @@ class FullyConnectedLayer(torch.nn.Module):
 #----------------------------------------------------------------------------
 
 @persistence.persistent_class
-# class Conv2dLayer(torch.nn.Module):
+# class Conv2dLayer(torch.nn.Module): #equalized learning rate 제거
 #     def __init__(self,
 #         in_channels,                    # Number of input channels.
 #         out_channels,                   # Number of output channels.
@@ -249,7 +249,7 @@ class MappingNetwork(torch.nn.Module):
         embed_features  = None,     # Label embedding dimensionality, None = same as w_dim.
         layer_features  = None,     # Number of intermediate features in the mapping layers, None = same as w_dim.
         activation      = 'lrelu',  # Activation function: 'relu', 'lrelu', etc.
-        # lr_multiplier   = 0.01,     # Learning rate multiplier for the mapping layers.
+        # lr_multiplier   = 0.01,     # Learning rate multiplier for the mapping layers. #lr_multiplier 사용한 부분 제거
         w_avg_beta      = 0.995,    # Decay for tracking the moving average of W during training, None = do not track.
     ):
         super().__init__()
@@ -273,7 +273,7 @@ class MappingNetwork(torch.nn.Module):
         for idx in range(num_layers):
             in_features = features_list[idx]
             out_features = features_list[idx + 1]
-            layer = FullyConnectedLayer(in_features, out_features, activation=activation)  #lr_multiplier=lr_multiplier도 괄호 안에 넣는 게 원래 코드 
+            layer = FullyConnectedLayer(in_features, out_features, activation=activation)  #lr_multiplier=lr_multiplier도 괄호 안에 넣는 게 원래 코드 #lr_multiplier 활용한 부분 제거거 
             setattr(self, f'fc{idx}', layer)
 
         if num_ws is not None and w_avg_beta is not None:
@@ -285,8 +285,8 @@ class MappingNetwork(torch.nn.Module):
         with torch.autograd.profiler.record_function('input'):
             if self.z_dim > 0:
                 misc.assert_shape(z, [None, self.z_dim])
-                #x = normalize_2nd_moment(z.to(torch.float32))
-                x = z.to(torch.float32)  # normalize_2nd_moment 제거
+                #x = normalize_2nd_moment(z.to(torch.float32))   #Z normalizion 제거
+                x = z.to(torch.float32)  # normalize_2nd_moment 제거 #Z normalizion 제거
             if self.c_dim > 0:
                 misc.assert_shape(c, [None, self.c_dim])
                 y = normalize_2nd_moment(self.embed(c.to(torch.float32)))
@@ -316,15 +316,6 @@ class MappingNetwork(torch.nn.Module):
                 else:
                     x[:, :truncation_cutoff] = self.w_avg.lerp(x[:, :truncation_cutoff], truncation_psi)
         return x
-# class MappingNetwork(torch.nn.Module):
-#     def __init__(self, z_dim, c_dim, w_dim, num_ws, **kwargs):
-#         super().__init__()
-#         self.z_dim = z_dim
-#         self.w_dim = w_dim
-#         self.num_ws = num_ws
-
-#     def forward(self, z, c=None, **kwargs):
-#         return z.unsqueeze(1).repeat(1, self.num_ws, 1)
 
 #----------------------------------------------------------------------------
 
@@ -577,41 +568,6 @@ class Generator(torch.nn.Module):
         img = self.synthesis(ws, **synthesis_kwargs)
         return img
 
-@persistence.persistent_class #mapping kwargs 제거 위해 추가함
-class DummyMapping(torch.nn.Module):
-    def forward(self, *args, **kwargs):
-        return None
-class NoMappingGenerator(torch.nn.Module):
-    def __init__(self,
-        z_dim,                      # Input latent (Z) dimensionality.
-        c_dim,                      # Conditioning label (C) dimensionality. (무시됨)
-        w_dim,                      # Latent (W) dimensionality == z_dim으로 설정
-        img_resolution,             # Output image resolution.
-        img_channels,               # Number of output image channels.
-        synthesis_kwargs = {},      # Arguments for SynthesisNetwork.
-    ):
-        super().__init__()
-        assert z_dim == w_dim 
-        self.z_dim = z_dim
-        self.c_dim = c_dim
-        self.w_dim = w_dim
-        self.img_resolution = img_resolution
-        self.img_channels = img_channels
-
-        self.synthesis = SynthesisNetwork(
-            w_dim=w_dim,
-            img_resolution=img_resolution,
-            img_channels=img_channels,
-            **synthesis_kwargs
-        )
-        self.num_ws = self.synthesis.num_ws
-        self.mapping = DummyMapping()
-
-    def forward(self, z, c=None, **synthesis_kwargs):
-        # z를 ws로 직접 broadcast (스타일 벡터로 사용)
-        ws = z.unsqueeze(1).repeat(1, self.num_ws, 1)  # shape: [batch, num_ws, w_dim]
-        img = self.synthesis(ws, **synthesis_kwargs)
-        return img, ws
 #----------------------------------------------------------------------------
 
 @persistence.persistent_class
@@ -747,8 +703,8 @@ class DiscriminatorEpilogue(torch.nn.Module):
 
         if architecture == 'skip':
             self.fromrgb = Conv2dLayer(img_channels, in_channels, kernel_size=1, activation=activation)
-        # self.mbstd = MinibatchStdLayer(group_size=mbstd_group_size, num_channels=mbstd_num_channels) if mbstd_num_channels > 0 else None
-        # self.conv = Conv2dLayer(in_channels + mbstd_num_channels, in_channels, kernel_size=3, activation=activation, conv_clamp=conv_clamp)
+        # self.mbstd = MinibatchStdLayer(group_size=mbstd_group_size, num_channels=mbstd_num_channels) if mbstd_num_channels > 0 else None  #minibatch stddev 제거
+        # self.conv = Conv2dLayer(in_channels + mbstd_num_channels, in_channels, kernel_size=3, activation=activation, conv_clamp=conv_clamp) #minibatch stddev 제거
         self.mbstd = None
         self.conv = Conv2dLayer(in_channels, in_channels, kernel_size=3, activation=activation, conv_clamp=conv_clamp)
         self.fc = FullyConnectedLayer(in_channels * (resolution ** 2), in_channels, activation=activation)
@@ -840,21 +796,4 @@ class Discriminator(torch.nn.Module):
             cmap = self.mapping(None, c)
         x = self.b4(x, img, cmap)
         return x
-    # def forward(self, x, c=None):
-    #     cmap = None
-    #     if self.c_dim > 0:
-    #         cmap = self.mapping(None, c)
-        
-    #     for block in self.blocks.values():
-    #         x = block(x)
-    #         if isinstance(x, tuple):
-    #             x = x[0]  # 추가된 처리
-
-    #     x = self.b4(x)
-    #     if isinstance(x, tuple):
-    #         x = x[0]  # b4도 tuple 반환 가능성
-
-    #     x = self.epilogue(x, cmap)
-    #     return x
-
 #----------------------------------------------------------------------------
