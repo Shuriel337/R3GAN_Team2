@@ -86,53 +86,122 @@ def modulated_conv2d(
 #----------------------------------------------------------------------------
 
 @persistence.persistent_class
+# class FullyConnectedLayer(torch.nn.Module):
+#     def __init__(self,
+#         in_features,                # Number of input features.
+#         out_features,               # Number of output features.
+#         bias            = True,     # Apply additive bias before the activation function?
+#         activation      = 'linear', # Activation function: 'relu', 'lrelu', etc.
+#         lr_multiplier   = 1,        # Learning rate multiplier.
+#         bias_init       = 0,        # Initial value for the additive bias.
+#     ):
+#         super().__init__()
+#         self.activation = activation
+#         self.weight = torch.nn.Parameter(torch.randn([out_features, in_features]) / lr_multiplier)
+#         self.bias = torch.nn.Parameter(torch.full([out_features], float(bias_init))) if bias else None
+#         self.weight_gain = lr_multiplier / np.sqrt(in_features)
+#         self.bias_gain = lr_multiplier
+
+#     def forward(self, x):
+#         w = self.weight.to(x.dtype) * self.weight_gain
+#         b = self.bias
+#         if b is not None:
+#             b = b.to(x.dtype)
+#             if self.bias_gain != 1:
+#                 b = b * self.bias_gain
+
+#         if self.activation == 'linear' and b is not None:
+#             x = torch.addmm(b.unsqueeze(0), x, w.t())
+#         else:
+#             x = x.matmul(w.t())
+#             x = bias_act.bias_act(x, b, act=self.activation)
+#         return x
 class FullyConnectedLayer(torch.nn.Module):
     def __init__(self,
-        in_features,                # Number of input features.
-        out_features,               # Number of output features.
-        bias            = True,     # Apply additive bias before the activation function?
-        activation      = 'linear', # Activation function: 'relu', 'lrelu', etc.
-        lr_multiplier   = 1,        # Learning rate multiplier.
-        bias_init       = 0,        # Initial value for the additive bias.
+        in_features,
+        out_features,
+        bias=True,
+        activation='linear',
+        bias_init=0,
     ):
         super().__init__()
         self.activation = activation
-        self.weight = torch.nn.Parameter(torch.randn([out_features, in_features]) / lr_multiplier)
-        self.bias = torch.nn.Parameter(torch.full([out_features], np.float32(bias_init))) if bias else None
-        self.weight_gain = lr_multiplier / np.sqrt(in_features)
-        self.bias_gain = lr_multiplier
+        self.weight = torch.nn.Parameter(torch.randn([out_features, in_features]) * np.sqrt(2 / in_features))
+        self.bias = torch.nn.Parameter(torch.full([out_features], float(bias_init))) if bias else None
 
     def forward(self, x):
-        w = self.weight.to(x.dtype) * self.weight_gain
-        b = self.bias
-        if b is not None:
-            b = b.to(x.dtype)
-            if self.bias_gain != 1:
-                b = b * self.bias_gain
+        b = self.bias.to(x.dtype) if self.bias is not None else None
 
         if self.activation == 'linear' and b is not None:
-            x = torch.addmm(b.unsqueeze(0), x, w.t())
+            x = torch.addmm(b.unsqueeze(0), x, self.weight.t())
         else:
-            x = x.matmul(w.t())
+            x = x.matmul(self.weight.t())
             x = bias_act.bias_act(x, b, act=self.activation)
         return x
 
 #----------------------------------------------------------------------------
 
 @persistence.persistent_class
+# class Conv2dLayer(torch.nn.Module):
+#     def __init__(self,
+#         in_channels,                    # Number of input channels.
+#         out_channels,                   # Number of output channels.
+#         kernel_size,                    # Width and height of the convolution kernel.
+#         bias            = True,         # Apply additive bias before the activation function?
+#         activation      = 'linear',     # Activation function: 'relu', 'lrelu', etc.
+#         up              = 1,            # Integer upsampling factor.
+#         down            = 1,            # Integer downsampling factor.
+#         resample_filter = [1,3,3,1],    # Low-pass filter to apply when resampling activations.
+#         conv_clamp      = None,         # Clamp the output to +-X, None = disable clamping.
+#         channels_last   = False,        # Expect the input to have memory_format=channels_last?
+#         trainable       = True,         # Update the weights of this layer during training?
+#     ):
+#         super().__init__()
+#         self.activation = activation
+#         self.up = up
+#         self.down = down
+#         self.conv_clamp = conv_clamp
+#         self.register_buffer('resample_filter', upfirdn2d.setup_filter(resample_filter))
+#         self.padding = kernel_size // 2
+#         self.weight_gain = 1 / np.sqrt(in_channels * (kernel_size ** 2))
+#         self.act_gain = bias_act.activation_funcs[activation].def_gain
+
+#         memory_format = torch.channels_last if channels_last else torch.contiguous_format
+#         weight = torch.randn([out_channels, in_channels, kernel_size, kernel_size]).to(memory_format=memory_format)
+#         bias = torch.zeros([out_channels]) if bias else None
+#         if trainable:
+#             self.weight = torch.nn.Parameter(weight)
+#             self.bias = torch.nn.Parameter(bias) if bias is not None else None
+#         else:
+#             self.register_buffer('weight', weight)
+#             if bias is not None:
+#                 self.register_buffer('bias', bias)
+#             else:
+#                 self.bias = None
+
+#     def forward(self, x, gain=1):
+#         w = self.weight * self.weight_gain
+#         b = self.bias.to(x.dtype) if self.bias is not None else None
+#         flip_weight = (self.up == 1) # slightly faster
+#         x = conv2d_resample.conv2d_resample(x=x, w=w.to(x.dtype), f=self.resample_filter, up=self.up, down=self.down, padding=self.padding, flip_weight=flip_weight)
+
+#         act_gain = self.act_gain * gain
+#         act_clamp = self.conv_clamp * gain if self.conv_clamp is not None else None
+#         x = bias_act.bias_act(x, b, act=self.activation, gain=act_gain, clamp=act_clamp)
+#         return x
 class Conv2dLayer(torch.nn.Module):
     def __init__(self,
-        in_channels,                    # Number of input channels.
-        out_channels,                   # Number of output channels.
-        kernel_size,                    # Width and height of the convolution kernel.
-        bias            = True,         # Apply additive bias before the activation function?
-        activation      = 'linear',     # Activation function: 'relu', 'lrelu', etc.
-        up              = 1,            # Integer upsampling factor.
-        down            = 1,            # Integer downsampling factor.
-        resample_filter = [1,3,3,1],    # Low-pass filter to apply when resampling activations.
-        conv_clamp      = None,         # Clamp the output to +-X, None = disable clamping.
-        channels_last   = False,        # Expect the input to have memory_format=channels_last?
-        trainable       = True,         # Update the weights of this layer during training?
+        in_channels,
+        out_channels,
+        kernel_size,
+        bias=True,
+        activation='linear',
+        up=1,
+        down=1,
+        resample_filter=[1,3,3,1],
+        conv_clamp=None,
+        channels_last=False,
+        trainable=True,
     ):
         super().__init__()
         self.activation = activation
@@ -141,12 +210,12 @@ class Conv2dLayer(torch.nn.Module):
         self.conv_clamp = conv_clamp
         self.register_buffer('resample_filter', upfirdn2d.setup_filter(resample_filter))
         self.padding = kernel_size // 2
-        self.weight_gain = 1 / np.sqrt(in_channels * (kernel_size ** 2))
-        self.act_gain = bias_act.activation_funcs[activation].def_gain
 
         memory_format = torch.channels_last if channels_last else torch.contiguous_format
-        weight = torch.randn([out_channels, in_channels, kernel_size, kernel_size]).to(memory_format=memory_format)
+        weight = torch.randn([out_channels, in_channels, kernel_size, kernel_size]) * np.sqrt(2 / (in_channels * kernel_size * kernel_size))
+        weight = weight.to(memory_format=memory_format)
         bias = torch.zeros([out_channels]) if bias else None
+
         if trainable:
             self.weight = torch.nn.Parameter(weight)
             self.bias = torch.nn.Parameter(bias) if bias is not None else None
@@ -158,14 +227,13 @@ class Conv2dLayer(torch.nn.Module):
                 self.bias = None
 
     def forward(self, x, gain=1):
-        w = self.weight * self.weight_gain
+        w = self.weight
         b = self.bias.to(x.dtype) if self.bias is not None else None
-        flip_weight = (self.up == 1) # slightly faster
+        flip_weight = (self.up == 1)
         x = conv2d_resample.conv2d_resample(x=x, w=w.to(x.dtype), f=self.resample_filter, up=self.up, down=self.down, padding=self.padding, flip_weight=flip_weight)
 
-        act_gain = self.act_gain * gain
         act_clamp = self.conv_clamp * gain if self.conv_clamp is not None else None
-        x = bias_act.bias_act(x, b, act=self.activation, gain=act_gain, clamp=act_clamp)
+        x = bias_act.bias_act(x, b, act=self.activation, gain=gain, clamp=act_clamp)  # gain은 그대로 유지하거나 1.0으로 고정 가능
         return x
 
 #----------------------------------------------------------------------------
@@ -181,7 +249,7 @@ class MappingNetwork(torch.nn.Module):
         embed_features  = None,     # Label embedding dimensionality, None = same as w_dim.
         layer_features  = None,     # Number of intermediate features in the mapping layers, None = same as w_dim.
         activation      = 'lrelu',  # Activation function: 'relu', 'lrelu', etc.
-        lr_multiplier   = 0.01,     # Learning rate multiplier for the mapping layers.
+        # lr_multiplier   = 0.01,     # Learning rate multiplier for the mapping layers.
         w_avg_beta      = 0.995,    # Decay for tracking the moving average of W during training, None = do not track.
     ):
         super().__init__()
@@ -205,7 +273,7 @@ class MappingNetwork(torch.nn.Module):
         for idx in range(num_layers):
             in_features = features_list[idx]
             out_features = features_list[idx + 1]
-            layer = FullyConnectedLayer(in_features, out_features, activation=activation, lr_multiplier=lr_multiplier)
+            layer = FullyConnectedLayer(in_features, out_features, activation=activation)  #lr_multiplier=lr_multiplier도 괄호 안에 넣는 게 원래 코드 
             setattr(self, f'fc{idx}', layer)
 
         if num_ws is not None and w_avg_beta is not None:
@@ -217,7 +285,8 @@ class MappingNetwork(torch.nn.Module):
         with torch.autograd.profiler.record_function('input'):
             if self.z_dim > 0:
                 misc.assert_shape(z, [None, self.z_dim])
-                x = normalize_2nd_moment(z.to(torch.float32))
+                #x = normalize_2nd_moment(z.to(torch.float32))
+                x = z.to(torch.float32)  # normalize_2nd_moment 제거
             if self.c_dim > 0:
                 misc.assert_shape(c, [None, self.c_dim])
                 y = normalize_2nd_moment(self.embed(c.to(torch.float32)))
@@ -247,6 +316,15 @@ class MappingNetwork(torch.nn.Module):
                 else:
                     x[:, :truncation_cutoff] = self.w_avg.lerp(x[:, :truncation_cutoff], truncation_psi)
         return x
+# class MappingNetwork(torch.nn.Module):
+#     def __init__(self, z_dim, c_dim, w_dim, num_ws, **kwargs):
+#         super().__init__()
+#         self.z_dim = z_dim
+#         self.w_dim = w_dim
+#         self.num_ws = num_ws
+
+#     def forward(self, z, c=None, **kwargs):
+#         return z.unsqueeze(1).repeat(1, self.num_ws, 1)
 
 #----------------------------------------------------------------------------
 
@@ -499,6 +577,41 @@ class Generator(torch.nn.Module):
         img = self.synthesis(ws, **synthesis_kwargs)
         return img
 
+@persistence.persistent_class #mapping kwargs 제거 위해 추가함
+class DummyMapping(torch.nn.Module):
+    def forward(self, *args, **kwargs):
+        return None
+class NoMappingGenerator(torch.nn.Module):
+    def __init__(self,
+        z_dim,                      # Input latent (Z) dimensionality.
+        c_dim,                      # Conditioning label (C) dimensionality. (무시됨)
+        w_dim,                      # Latent (W) dimensionality == z_dim으로 설정
+        img_resolution,             # Output image resolution.
+        img_channels,               # Number of output image channels.
+        synthesis_kwargs = {},      # Arguments for SynthesisNetwork.
+    ):
+        super().__init__()
+        assert z_dim == w_dim 
+        self.z_dim = z_dim
+        self.c_dim = c_dim
+        self.w_dim = w_dim
+        self.img_resolution = img_resolution
+        self.img_channels = img_channels
+
+        self.synthesis = SynthesisNetwork(
+            w_dim=w_dim,
+            img_resolution=img_resolution,
+            img_channels=img_channels,
+            **synthesis_kwargs
+        )
+        self.num_ws = self.synthesis.num_ws
+        self.mapping = DummyMapping()
+
+    def forward(self, z, c=None, **synthesis_kwargs):
+        # z를 ws로 직접 broadcast (스타일 벡터로 사용)
+        ws = z.unsqueeze(1).repeat(1, self.num_ws, 1)  # shape: [batch, num_ws, w_dim]
+        img = self.synthesis(ws, **synthesis_kwargs)
+        return img, ws
 #----------------------------------------------------------------------------
 
 @persistence.persistent_class
@@ -634,8 +747,10 @@ class DiscriminatorEpilogue(torch.nn.Module):
 
         if architecture == 'skip':
             self.fromrgb = Conv2dLayer(img_channels, in_channels, kernel_size=1, activation=activation)
-        self.mbstd = MinibatchStdLayer(group_size=mbstd_group_size, num_channels=mbstd_num_channels) if mbstd_num_channels > 0 else None
-        self.conv = Conv2dLayer(in_channels + mbstd_num_channels, in_channels, kernel_size=3, activation=activation, conv_clamp=conv_clamp)
+        # self.mbstd = MinibatchStdLayer(group_size=mbstd_group_size, num_channels=mbstd_num_channels) if mbstd_num_channels > 0 else None
+        # self.conv = Conv2dLayer(in_channels + mbstd_num_channels, in_channels, kernel_size=3, activation=activation, conv_clamp=conv_clamp)
+        self.mbstd = None
+        self.conv = Conv2dLayer(in_channels, in_channels, kernel_size=3, activation=activation, conv_clamp=conv_clamp)
         self.fc = FullyConnectedLayer(in_channels * (resolution ** 2), in_channels, activation=activation)
         self.out = FullyConnectedLayer(in_channels, 1 if cmap_dim == 0 else cmap_dim)
 
@@ -725,5 +840,21 @@ class Discriminator(torch.nn.Module):
             cmap = self.mapping(None, c)
         x = self.b4(x, img, cmap)
         return x
+    # def forward(self, x, c=None):
+    #     cmap = None
+    #     if self.c_dim > 0:
+    #         cmap = self.mapping(None, c)
+        
+    #     for block in self.blocks.values():
+    #         x = block(x)
+    #         if isinstance(x, tuple):
+    #             x = x[0]  # 추가된 처리
+
+    #     x = self.b4(x)
+    #     if isinstance(x, tuple):
+    #         x = x[0]  # b4도 tuple 반환 가능성
+
+    #     x = self.epilogue(x, cmap)
+    #     return x
 
 #----------------------------------------------------------------------------
