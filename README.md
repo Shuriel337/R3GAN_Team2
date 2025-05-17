@@ -20,6 +20,6 @@ Config A 실행 로그
 
 kimg=500 학습 완료 했을 때: {"results": {"fid50k_full": 38.009531625838264}, "metric": "fid50k_full", "total_time": 401.24780344963074, "total_time_str": "6m 41s", "num_gpus": 1, "snapshot_pkl": "network-snapshot-000200.pkl", "timestamp": 1747133366.7522354}
 
-자세한 내용은 파일로 올려놓았습니다. (중간에 컴퓨터를 꺼야 할 일이 생겨서 300, 200으로 나누어 학습했습니다. resume을 사용하면 기존 pkl파일 기반으로 이어서 학습할 수 있습니다)
+자세한 내용은 StyleGAN Config A 코드 log.txt를 참고하시면 됩니다. (중간에 컴퓨터를 꺼야 할 일이 생겨서 300, 200으로 나누어 학습했습니다. resume을 사용하면 기존 pkl파일 기반으로 이어서 학습할 수 있습니다)
 
 
