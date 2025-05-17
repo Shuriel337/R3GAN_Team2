@@ -11,6 +11,7 @@ FFHQ 256*256 출처: https://www.kaggle.com/datasets/denislukovnikov/ffhq256-ima
 실행 방법
 
 CUDA_VISIBLE_DEVICES=0 python train.py --outdir=training-runs --data=ffhq256 --gpus=1 --cfg=paper256 --snap=10 --batch=32 --kimg=500 --metrics=fid50k_full --fp32=True
+
 kimg를 상황에 맞게 조절하면 되는데 elice에서 kimg=500으로 하면 6시간 정도 걸렸습니다.
 
 Config A 실행 로그
