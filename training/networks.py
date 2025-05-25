@@ -382,6 +382,69 @@ class MappingNetwork(torch.nn.Module):
 #         act_clamp = self.conv_clamp * gain if self.conv_clamp is not None else None
 #         x = bias_act.bias_act(x, self.bias.to(x.dtype), act=self.activation, gain=act_gain, clamp=act_clamp)
 #         return x
+# class SynthesisLayer(torch.nn.Module): #noise injection 제거
+#     def __init__(self,
+#         in_channels,
+#         out_channels,
+#         w_dim,                  
+#         resolution,
+#         kernel_size     = 3,
+#         up              = 1,
+#         use_noise       = True,
+#         activation      = 'lrelu',
+#         resample_filter = [1,3,3,1],
+#         conv_clamp      = None,
+#         channels_last   = False,
+#     ):
+#         super().__init__()
+#         self.resolution = resolution
+#         self.up = up
+#         self.use_noise = use_noise
+#         self.activation = activation
+#         self.conv_clamp = conv_clamp
+#         self.register_buffer('resample_filter', upfirdn2d.setup_filter(resample_filter))
+#         self.padding = kernel_size // 2
+#         self.act_gain = bias_act.activation_funcs[activation].def_gain
+
+#         # affine 제거
+#         # modulated weight 제거 → 일반 Conv2d 사용
+#         memory_format = torch.channels_last if channels_last else torch.contiguous_format
+#         self.conv = torch.nn.Conv2d(in_channels, out_channels, kernel_size, padding=self.padding).to(memory_format=memory_format)
+
+#         if use_noise:
+#             self.register_buffer('noise_const', torch.randn([resolution, resolution]))
+#             self.noise_strength = torch.nn.Parameter(torch.zeros([]))
+
+#         self.bias = torch.nn.Parameter(torch.zeros([out_channels]))
+
+#     def forward(self, x, noise_mode='random', fused_modconv=True, gain=1):
+#         assert noise_mode in ['random', 'const', 'none']
+
+#         # w 제거됨 → styles 없음
+#         in_resolution = self.resolution // self.up
+#         misc.assert_shape(x, [None, self.conv.in_channels, in_resolution, in_resolution])
+
+#         if self.up > 1:
+#             x = upfirdn2d.upsample2d(x, self.resample_filter, up=self.up)
+
+#         x = self.conv(x)
+
+#         if self.use_noise:
+#             if noise_mode == 'random':
+#                 noise = torch.randn([x.shape[0], 1, self.resolution, self.resolution], device=x.device) * self.noise_strength
+#             elif noise_mode == 'const':
+#                 noise = self.noise_const * self.noise_strength
+#             else:
+#                 noise = None
+
+#             if noise is not None:
+#                 x = x + noise
+
+#         act_gain = self.act_gain * gain
+#         act_clamp = self.conv_clamp * gain if self.conv_clamp is not None else None
+#         x = bias_act.bias_act(x, self.bias.to(x.dtype), act=self.activation, gain=act_gain, clamp=act_clamp)
+
+#         return x
 class SynthesisLayer(torch.nn.Module):
     def __init__(self,
         in_channels,
@@ -390,7 +453,6 @@ class SynthesisLayer(torch.nn.Module):
         resolution,
         kernel_size     = 3,
         up              = 1,
-        use_noise       = True,
         activation      = 'lrelu',
         resample_filter = [1,3,3,1],
         conv_clamp      = None,
@@ -399,27 +461,19 @@ class SynthesisLayer(torch.nn.Module):
         super().__init__()
         self.resolution = resolution
         self.up = up
-        self.use_noise = use_noise
         self.activation = activation
         self.conv_clamp = conv_clamp
         self.register_buffer('resample_filter', upfirdn2d.setup_filter(resample_filter))
         self.padding = kernel_size // 2
         self.act_gain = bias_act.activation_funcs[activation].def_gain
 
-        # affine 제거
-        # modulated weight 제거 → 일반 Conv2d 사용
+        # 일반 Conv2d
         memory_format = torch.channels_last if channels_last else torch.contiguous_format
         self.conv = torch.nn.Conv2d(in_channels, out_channels, kernel_size, padding=self.padding).to(memory_format=memory_format)
 
-        if use_noise:
-            self.register_buffer('noise_const', torch.randn([resolution, resolution]))
-            self.noise_strength = torch.nn.Parameter(torch.zeros([]))
-
         self.bias = torch.nn.Parameter(torch.zeros([out_channels]))
 
-    def forward(self, x, noise_mode='random', fused_modconv=True, gain=1):
-        assert noise_mode in ['random', 'const', 'none']
-
+    def forward(self, x, noise_mode='none', fused_modconv=True, gain=1):
         # w 제거됨 → styles 없음
         in_resolution = self.resolution // self.up
         misc.assert_shape(x, [None, self.conv.in_channels, in_resolution, in_resolution])
@@ -429,23 +483,13 @@ class SynthesisLayer(torch.nn.Module):
 
         x = self.conv(x)
 
-        if self.use_noise:
-            if noise_mode == 'random':
-                noise = torch.randn([x.shape[0], 1, self.resolution, self.resolution], device=x.device) * self.noise_strength
-            elif noise_mode == 'const':
-                noise = self.noise_const * self.noise_strength
-            else:
-                noise = None
-
-            if noise is not None:
-                x = x + noise
+        # Noise injection 제거됨
 
         act_gain = self.act_gain * gain
         act_clamp = self.conv_clamp * gain if self.conv_clamp is not None else None
         x = bias_act.bias_act(x, self.bias.to(x.dtype), act=self.activation, gain=act_gain, clamp=act_clamp)
 
         return x
-
 #----------------------------------------------------------------------------
 
 @persistence.persistent_class
