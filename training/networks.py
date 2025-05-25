@@ -8,6 +8,7 @@
 
 import numpy as np
 import torch
+import torch.nn.functional as F #style injection 제거 위해 추가
 from torch_utils import misc
 from torch_utils import persistence
 from torch_utils.ops import conv2d_resample
@@ -86,7 +87,7 @@ def modulated_conv2d(
 #----------------------------------------------------------------------------
 
 @persistence.persistent_class
-# class FullyConnectedLayer(torch.nn.Module): #equalized learning rate 제거
+# class FullyConnectedLayer(torch.nn.Module):
 #     def __init__(self,
 #         in_features,                # Number of input features.
 #         out_features,               # Number of output features.
@@ -142,7 +143,7 @@ class FullyConnectedLayer(torch.nn.Module):
 #----------------------------------------------------------------------------
 
 @persistence.persistent_class
-# class Conv2dLayer(torch.nn.Module): #equalized learning rate 제거
+# class Conv2dLayer(torch.nn.Module):
 #     def __init__(self,
 #         in_channels,                    # Number of input channels.
 #         out_channels,                   # Number of output channels.
@@ -249,7 +250,7 @@ class MappingNetwork(torch.nn.Module):
         embed_features  = None,     # Label embedding dimensionality, None = same as w_dim.
         layer_features  = None,     # Number of intermediate features in the mapping layers, None = same as w_dim.
         activation      = 'lrelu',  # Activation function: 'relu', 'lrelu', etc.
-        # lr_multiplier   = 0.01,     # Learning rate multiplier for the mapping layers. #lr_multiplier 사용한 부분 제거
+        # lr_multiplier   = 0.01,     # Learning rate multiplier for the mapping layers.
         w_avg_beta      = 0.995,    # Decay for tracking the moving average of W during training, None = do not track.
     ):
         super().__init__()
@@ -273,7 +274,7 @@ class MappingNetwork(torch.nn.Module):
         for idx in range(num_layers):
             in_features = features_list[idx]
             out_features = features_list[idx + 1]
-            layer = FullyConnectedLayer(in_features, out_features, activation=activation)  #lr_multiplier=lr_multiplier도 괄호 안에 넣는 게 원래 코드 #lr_multiplier 활용한 부분 제거거 
+            layer = FullyConnectedLayer(in_features, out_features, activation=activation)  #lr_multiplier=lr_multiplier도 괄호 안에 넣는 게 원래 코드 
             setattr(self, f'fc{idx}', layer)
 
         if num_ws is not None and w_avg_beta is not None:
@@ -285,8 +286,8 @@ class MappingNetwork(torch.nn.Module):
         with torch.autograd.profiler.record_function('input'):
             if self.z_dim > 0:
                 misc.assert_shape(z, [None, self.z_dim])
-                #x = normalize_2nd_moment(z.to(torch.float32))   #Z normalizion 제거
-                x = z.to(torch.float32)  # normalize_2nd_moment 제거 #Z normalizion 제거
+                #x = normalize_2nd_moment(z.to(torch.float32))
+                x = z.to(torch.float32)  # normalize_2nd_moment 제거
             if self.c_dim > 0:
                 misc.assert_shape(c, [None, self.c_dim])
                 y = normalize_2nd_moment(self.embed(c.to(torch.float32)))
@@ -316,23 +317,84 @@ class MappingNetwork(torch.nn.Module):
                 else:
                     x[:, :truncation_cutoff] = self.w_avg.lerp(x[:, :truncation_cutoff], truncation_psi)
         return x
+# class MappingNetwork(torch.nn.Module):
+#     def __init__(self, z_dim, c_dim, w_dim, num_ws, **kwargs):
+#         super().__init__()
+#         self.z_dim = z_dim
+#         self.w_dim = w_dim
+#         self.num_ws = num_ws
+
+#     def forward(self, z, c=None, **kwargs):
+#         return z.unsqueeze(1).repeat(1, self.num_ws, 1)
 
 #----------------------------------------------------------------------------
 
 @persistence.persistent_class
+# class SynthesisLayer(torch.nn.Module):  #style injection 제거
+#     def __init__(self,
+#         in_channels,                    # Number of input channels.
+#         out_channels,                   # Number of output channels.
+#         w_dim,                          # Intermediate latent (W) dimensionality.
+#         resolution,                     # Resolution of this layer.
+#         kernel_size     = 3,            # Convolution kernel size.
+#         up              = 1,            # Integer upsampling factor.
+#         use_noise       = True,         # Enable noise input?
+#         activation      = 'lrelu',      # Activation function: 'relu', 'lrelu', etc.
+#         resample_filter = [1,3,3,1],    # Low-pass filter to apply when resampling activations.
+#         conv_clamp      = None,         # Clamp the output of convolution layers to +-X, None = disable clamping.
+#         channels_last   = False,        # Use channels_last format for the weights?
+#     ):
+#         super().__init__()
+#         self.resolution = resolution
+#         self.up = up
+#         self.use_noise = use_noise
+#         self.activation = activation
+#         self.conv_clamp = conv_clamp
+#         self.register_buffer('resample_filter', upfirdn2d.setup_filter(resample_filter))
+#         self.padding = kernel_size // 2
+#         self.act_gain = bias_act.activation_funcs[activation].def_gain
+
+#         self.affine = FullyConnectedLayer(w_dim, in_channels, bias_init=1)
+#         memory_format = torch.channels_last if channels_last else torch.contiguous_format
+#         self.weight = torch.nn.Parameter(torch.randn([out_channels, in_channels, kernel_size, kernel_size]).to(memory_format=memory_format))
+#         if use_noise:
+#             self.register_buffer('noise_const', torch.randn([resolution, resolution]))
+#             self.noise_strength = torch.nn.Parameter(torch.zeros([]))
+#         self.bias = torch.nn.Parameter(torch.zeros([out_channels]))
+
+#     def forward(self, x, w, noise_mode='random', fused_modconv=True, gain=1):
+#         assert noise_mode in ['random', 'const', 'none']
+#         in_resolution = self.resolution // self.up
+#         misc.assert_shape(x, [None, self.weight.shape[1], in_resolution, in_resolution])
+#         styles = self.affine(w)
+
+#         noise = None
+#         if self.use_noise and noise_mode == 'random':
+#             noise = torch.randn([x.shape[0], 1, self.resolution, self.resolution], device=x.device) * self.noise_strength
+#         if self.use_noise and noise_mode == 'const':
+#             noise = self.noise_const * self.noise_strength
+
+#         flip_weight = (self.up == 1) # slightly faster
+#         x = modulated_conv2d(x=x, weight=self.weight, styles=styles, noise=noise, up=self.up,
+#             padding=self.padding, resample_filter=self.resample_filter, flip_weight=flip_weight, fused_modconv=fused_modconv)
+
+#         act_gain = self.act_gain * gain
+#         act_clamp = self.conv_clamp * gain if self.conv_clamp is not None else None
+#         x = bias_act.bias_act(x, self.bias.to(x.dtype), act=self.activation, gain=act_gain, clamp=act_clamp)
+#         return x
 class SynthesisLayer(torch.nn.Module):
     def __init__(self,
-        in_channels,                    # Number of input channels.
-        out_channels,                   # Number of output channels.
-        w_dim,                          # Intermediate latent (W) dimensionality.
-        resolution,                     # Resolution of this layer.
-        kernel_size     = 3,            # Convolution kernel size.
-        up              = 1,            # Integer upsampling factor.
-        use_noise       = True,         # Enable noise input?
-        activation      = 'lrelu',      # Activation function: 'relu', 'lrelu', etc.
-        resample_filter = [1,3,3,1],    # Low-pass filter to apply when resampling activations.
-        conv_clamp      = None,         # Clamp the output of convolution layers to +-X, None = disable clamping.
-        channels_last   = False,        # Use channels_last format for the weights?
+        in_channels,
+        out_channels,
+        w_dim,                  
+        resolution,
+        kernel_size     = 3,
+        up              = 1,
+        use_noise       = True,
+        activation      = 'lrelu',
+        resample_filter = [1,3,3,1],
+        conv_clamp      = None,
+        channels_last   = False,
     ):
         super().__init__()
         self.resolution = resolution
@@ -344,76 +406,194 @@ class SynthesisLayer(torch.nn.Module):
         self.padding = kernel_size // 2
         self.act_gain = bias_act.activation_funcs[activation].def_gain
 
-        self.affine = FullyConnectedLayer(w_dim, in_channels, bias_init=1)
+        # affine 제거
+        # modulated weight 제거 → 일반 Conv2d 사용
         memory_format = torch.channels_last if channels_last else torch.contiguous_format
-        self.weight = torch.nn.Parameter(torch.randn([out_channels, in_channels, kernel_size, kernel_size]).to(memory_format=memory_format))
+        self.conv = torch.nn.Conv2d(in_channels, out_channels, kernel_size, padding=self.padding).to(memory_format=memory_format)
+
         if use_noise:
             self.register_buffer('noise_const', torch.randn([resolution, resolution]))
             self.noise_strength = torch.nn.Parameter(torch.zeros([]))
+
         self.bias = torch.nn.Parameter(torch.zeros([out_channels]))
 
-    def forward(self, x, w, noise_mode='random', fused_modconv=True, gain=1):
+    def forward(self, x, noise_mode='random', fused_modconv=True, gain=1):
         assert noise_mode in ['random', 'const', 'none']
+
+        # w 제거됨 → styles 없음
         in_resolution = self.resolution // self.up
-        misc.assert_shape(x, [None, self.weight.shape[1], in_resolution, in_resolution])
-        styles = self.affine(w)
+        misc.assert_shape(x, [None, self.conv.in_channels, in_resolution, in_resolution])
 
-        noise = None
-        if self.use_noise and noise_mode == 'random':
-            noise = torch.randn([x.shape[0], 1, self.resolution, self.resolution], device=x.device) * self.noise_strength
-        if self.use_noise and noise_mode == 'const':
-            noise = self.noise_const * self.noise_strength
+        if self.up > 1:
+            x = upfirdn2d.upsample2d(x, self.resample_filter, up=self.up)
 
-        flip_weight = (self.up == 1) # slightly faster
-        x = modulated_conv2d(x=x, weight=self.weight, styles=styles, noise=noise, up=self.up,
-            padding=self.padding, resample_filter=self.resample_filter, flip_weight=flip_weight, fused_modconv=fused_modconv)
+        x = self.conv(x)
+
+        if self.use_noise:
+            if noise_mode == 'random':
+                noise = torch.randn([x.shape[0], 1, self.resolution, self.resolution], device=x.device) * self.noise_strength
+            elif noise_mode == 'const':
+                noise = self.noise_const * self.noise_strength
+            else:
+                noise = None
+
+            if noise is not None:
+                x = x + noise
 
         act_gain = self.act_gain * gain
         act_clamp = self.conv_clamp * gain if self.conv_clamp is not None else None
         x = bias_act.bias_act(x, self.bias.to(x.dtype), act=self.activation, gain=act_gain, clamp=act_clamp)
+
         return x
 
 #----------------------------------------------------------------------------
 
 @persistence.persistent_class
+# class ToRGBLayer(torch.nn.Module): #style injection 제거
+#     def __init__(self, in_channels, out_channels, w_dim, kernel_size=1, conv_clamp=None, channels_last=False):
+#         super().__init__()
+#         self.conv_clamp = conv_clamp
+#         self.affine = FullyConnectedLayer(w_dim, in_channels, bias_init=1)
+#         memory_format = torch.channels_last if channels_last else torch.contiguous_format
+#         self.weight = torch.nn.Parameter(torch.randn([out_channels, in_channels, kernel_size, kernel_size]).to(memory_format=memory_format))
+#         self.bias = torch.nn.Parameter(torch.zeros([out_channels]))
+#         self.weight_gain = 1 / np.sqrt(in_channels * (kernel_size ** 2))
+
+#     def forward(self, x, w, fused_modconv=True):
+#         styles = self.affine(w) * self.weight_gain
+#         x = modulated_conv2d(x=x, weight=self.weight, styles=styles, demodulate=False, fused_modconv=fused_modconv)
+#         x = bias_act.bias_act(x, self.bias.to(x.dtype), clamp=self.conv_clamp)
+#         return x
+
 class ToRGBLayer(torch.nn.Module):
-    def __init__(self, in_channels, out_channels, w_dim, kernel_size=1, conv_clamp=None, channels_last=False):
+    def __init__(self, in_channels, out_channels, kernel_size=1, conv_clamp=None, channels_last=False):
         super().__init__()
         self.conv_clamp = conv_clamp
-        self.affine = FullyConnectedLayer(w_dim, in_channels, bias_init=1)
         memory_format = torch.channels_last if channels_last else torch.contiguous_format
         self.weight = torch.nn.Parameter(torch.randn([out_channels, in_channels, kernel_size, kernel_size]).to(memory_format=memory_format))
         self.bias = torch.nn.Parameter(torch.zeros([out_channels]))
-        self.weight_gain = 1 / np.sqrt(in_channels * (kernel_size ** 2))
 
-    def forward(self, x, w, fused_modconv=True):
-        styles = self.affine(w) * self.weight_gain
-        x = modulated_conv2d(x=x, weight=self.weight, styles=styles, demodulate=False, fused_modconv=fused_modconv)
-        x = bias_act.bias_act(x, self.bias.to(x.dtype), clamp=self.conv_clamp)
+    def forward(self, x, fused_modconv=True):
+        x = F.conv2d(x, self.weight, bias=self.bias, stride=1, padding=0)
+        
+        if self.conv_clamp is not None:
+            x = x.clamp(-self.conv_clamp, self.conv_clamp)
+
         return x
 
 #----------------------------------------------------------------------------
 
 @persistence.persistent_class
+# class SynthesisBlock(torch.nn.Module): #style injection 제거
+#     def __init__(self,
+#         in_channels,                        # Number of input channels, 0 = first block.
+#         out_channels,                       # Number of output channels.
+#         w_dim,                              # Intermediate latent (W) dimensionality.
+#         resolution,                         # Resolution of this block.
+#         img_channels,                       # Number of output color channels.
+#         is_last,                            # Is this the last block?
+#         architecture        = 'skip',       # Architecture: 'orig', 'skip', 'resnet'.
+#         resample_filter     = [1,3,3,1],    # Low-pass filter to apply when resampling activations.
+#         conv_clamp          = None,         # Clamp the output of convolution layers to +-X, None = disable clamping.
+#         use_fp16            = False,        # Use FP16 for this block?
+#         fp16_channels_last  = False,        # Use channels-last memory format with FP16?
+#         **layer_kwargs,                     # Arguments for SynthesisLayer.
+#     ):
+#         assert architecture in ['orig', 'skip', 'resnet']
+#         super().__init__()
+#         self.in_channels = in_channels
+#         self.w_dim = w_dim
+#         self.resolution = resolution
+#         self.img_channels = img_channels
+#         self.is_last = is_last
+#         self.architecture = architecture
+#         self.use_fp16 = use_fp16
+#         self.channels_last = (use_fp16 and fp16_channels_last)
+#         self.register_buffer('resample_filter', upfirdn2d.setup_filter(resample_filter))
+#         self.num_conv = 0
+#         self.num_torgb = 0
+
+#         if in_channels == 0:
+#             self.const = torch.nn.Parameter(torch.randn([out_channels, resolution, resolution]))
+
+#         if in_channels != 0:
+#             self.conv0 = SynthesisLayer(in_channels, out_channels, w_dim=w_dim, resolution=resolution, up=2,
+#                 resample_filter=resample_filter, conv_clamp=conv_clamp, channels_last=self.channels_last, **layer_kwargs)
+#             self.num_conv += 1
+
+#         self.conv1 = SynthesisLayer(out_channels, out_channels, w_dim=w_dim, resolution=resolution,
+#             conv_clamp=conv_clamp, channels_last=self.channels_last, **layer_kwargs)
+#         self.num_conv += 1
+
+#         if is_last or architecture == 'skip':
+#             self.torgb = ToRGBLayer(out_channels, img_channels, w_dim=w_dim,
+#                 conv_clamp=conv_clamp, channels_last=self.channels_last)
+#             self.num_torgb += 1
+
+#         if in_channels != 0 and architecture == 'resnet':
+#             self.skip = Conv2dLayer(in_channels, out_channels, kernel_size=1, bias=False, up=2,
+#                 resample_filter=resample_filter, channels_last=self.channels_last)
+
+#     def forward(self, x, img, ws, force_fp32=False, fused_modconv=None, **layer_kwargs):
+#         misc.assert_shape(ws, [None, self.num_conv + self.num_torgb, self.w_dim])
+#         w_iter = iter(ws.unbind(dim=1))
+#         dtype = torch.float16 if self.use_fp16 and not force_fp32 else torch.float32
+#         memory_format = torch.channels_last if self.channels_last and not force_fp32 else torch.contiguous_format
+#         if fused_modconv is None:
+#             with misc.suppress_tracer_warnings(): # this value will be treated as a constant
+#                 fused_modconv = (not self.training) and (dtype == torch.float32 or int(x.shape[0]) == 1)
+
+#         # Input.
+#         if self.in_channels == 0:
+#             x = self.const.to(dtype=dtype, memory_format=memory_format)
+#             x = x.unsqueeze(0).repeat([ws.shape[0], 1, 1, 1])
+#         else:
+#             misc.assert_shape(x, [None, self.in_channels, self.resolution // 2, self.resolution // 2])
+#             x = x.to(dtype=dtype, memory_format=memory_format)
+
+#         # Main layers.
+#         if self.in_channels == 0:
+#             x = self.conv1(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
+#         elif self.architecture == 'resnet':
+#             y = self.skip(x, gain=np.sqrt(0.5))
+#             x = self.conv0(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
+#             x = self.conv1(x, next(w_iter), fused_modconv=fused_modconv, gain=np.sqrt(0.5), **layer_kwargs)
+#             x = y.add_(x)
+#         else:
+#             x = self.conv0(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
+#             x = self.conv1(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
+
+#         # ToRGB.
+#         if img is not None:
+#             misc.assert_shape(img, [None, self.img_channels, self.resolution // 2, self.resolution // 2])
+#             img = upfirdn2d.upsample2d(img, self.resample_filter)
+#         if self.is_last or self.architecture == 'skip':
+#             y = self.torgb(x, next(w_iter), fused_modconv=fused_modconv)
+#             y = y.to(dtype=torch.float32, memory_format=torch.contiguous_format)
+#             img = img.add_(y) if img is not None else y
+
+#         assert x.dtype == dtype
+#         assert img is None or img.dtype == torch.float32
+#         return x, img
 class SynthesisBlock(torch.nn.Module):
     def __init__(self,
-        in_channels,                        # Number of input channels, 0 = first block.
-        out_channels,                       # Number of output channels.
-        w_dim,                              # Intermediate latent (W) dimensionality.
-        resolution,                         # Resolution of this block.
-        img_channels,                       # Number of output color channels.
-        is_last,                            # Is this the last block?
-        architecture        = 'skip',       # Architecture: 'orig', 'skip', 'resnet'.
-        resample_filter     = [1,3,3,1],    # Low-pass filter to apply when resampling activations.
-        conv_clamp          = None,         # Clamp the output of convolution layers to +-X, None = disable clamping.
-        use_fp16            = False,        # Use FP16 for this block?
-        fp16_channels_last  = False,        # Use channels-last memory format with FP16?
-        **layer_kwargs,                     # Arguments for SynthesisLayer.
+        in_channels,
+        out_channels,
+        resolution,
+        img_channels,
+        is_last,
+        architecture        = 'skip',
+        resample_filter     = [1,3,3,1],
+        conv_clamp          = None,
+        use_fp16            = False,
+        fp16_channels_last  = False,
+        num_conv=2,                        #style injection 위해 추가
+        num_torgb=1,
+        **layer_kwargs,
     ):
         assert architecture in ['orig', 'skip', 'resnet']
         super().__init__()
         self.in_channels = in_channels
-        self.w_dim = w_dim
         self.resolution = resolution
         self.img_channels = img_channels
         self.is_last = is_last
@@ -421,65 +601,58 @@ class SynthesisBlock(torch.nn.Module):
         self.use_fp16 = use_fp16
         self.channels_last = (use_fp16 and fp16_channels_last)
         self.register_buffer('resample_filter', upfirdn2d.setup_filter(resample_filter))
-        self.num_conv = 0
-        self.num_torgb = 0
 
         if in_channels == 0:
             self.const = torch.nn.Parameter(torch.randn([out_channels, resolution, resolution]))
 
         if in_channels != 0:
-            self.conv0 = SynthesisLayer(in_channels, out_channels, w_dim=w_dim, resolution=resolution, up=2,
+            self.conv0 = SynthesisLayer(in_channels, out_channels, w_dim=0, resolution=resolution, up=2,
                 resample_filter=resample_filter, conv_clamp=conv_clamp, channels_last=self.channels_last, **layer_kwargs)
-            self.num_conv += 1
 
-        self.conv1 = SynthesisLayer(out_channels, out_channels, w_dim=w_dim, resolution=resolution,
+        self.conv1 = SynthesisLayer(out_channels, out_channels, w_dim=0, resolution=resolution,
             conv_clamp=conv_clamp, channels_last=self.channels_last, **layer_kwargs)
-        self.num_conv += 1
 
         if is_last or architecture == 'skip':
-            self.torgb = ToRGBLayer(out_channels, img_channels, w_dim=w_dim,
+            self.torgb = ToRGBLayer(out_channels, img_channels,
                 conv_clamp=conv_clamp, channels_last=self.channels_last)
-            self.num_torgb += 1
 
         if in_channels != 0 and architecture == 'resnet':
             self.skip = Conv2dLayer(in_channels, out_channels, kernel_size=1, bias=False, up=2,
                 resample_filter=resample_filter, channels_last=self.channels_last)
+        
+        self.num_conv = num_conv  # conv0, conv1  #style injection 위해 추가
+        self.num_torgb = num_torgb
 
-    def forward(self, x, img, ws, force_fp32=False, fused_modconv=None, **layer_kwargs):
-        misc.assert_shape(ws, [None, self.num_conv + self.num_torgb, self.w_dim])
-        w_iter = iter(ws.unbind(dim=1))
+
+    def forward(self, x, img, force_fp32=False, fused_modconv=None, **layer_kwargs):
         dtype = torch.float16 if self.use_fp16 and not force_fp32 else torch.float32
         memory_format = torch.channels_last if self.channels_last and not force_fp32 else torch.contiguous_format
         if fused_modconv is None:
-            with misc.suppress_tracer_warnings(): # this value will be treated as a constant
+            with misc.suppress_tracer_warnings():
                 fused_modconv = (not self.training) and (dtype == torch.float32 or int(x.shape[0]) == 1)
 
-        # Input.
         if self.in_channels == 0:
             x = self.const.to(dtype=dtype, memory_format=memory_format)
-            x = x.unsqueeze(0).repeat([ws.shape[0], 1, 1, 1])
+            x = x.unsqueeze(0).repeat([img.shape[0] if img is not None else 1, 1, 1, 1])
         else:
-            misc.assert_shape(x, [None, self.in_channels, self.resolution // 2, self.resolution // 2])
             x = x.to(dtype=dtype, memory_format=memory_format)
 
-        # Main layers.
         if self.in_channels == 0:
-            x = self.conv1(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
+            x = self.conv1(x, fused_modconv=fused_modconv, **layer_kwargs)
         elif self.architecture == 'resnet':
             y = self.skip(x, gain=np.sqrt(0.5))
-            x = self.conv0(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
-            x = self.conv1(x, next(w_iter), fused_modconv=fused_modconv, gain=np.sqrt(0.5), **layer_kwargs)
+            x = self.conv0(x, fused_modconv=fused_modconv, **layer_kwargs)
+            x = self.conv1(x, fused_modconv=fused_modconv, gain=np.sqrt(0.5), **layer_kwargs)
             x = y.add_(x)
         else:
-            x = self.conv0(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
-            x = self.conv1(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
+            x = self.conv0(x, fused_modconv=fused_modconv, **layer_kwargs)
+            x = self.conv1(x, fused_modconv=fused_modconv, **layer_kwargs)
 
-        # ToRGB.
         if img is not None:
-            misc.assert_shape(img, [None, self.img_channels, self.resolution // 2, self.resolution // 2])
+            img = img.to(dtype=torch.float32, memory_format=torch.contiguous_format)
             img = upfirdn2d.upsample2d(img, self.resample_filter)
         if self.is_last or self.architecture == 'skip':
-            y = self.torgb(x, next(w_iter), fused_modconv=fused_modconv)
+            y = self.torgb(x, fused_modconv=fused_modconv)
             y = y.to(dtype=torch.float32, memory_format=torch.contiguous_format)
             img = img.add_(y) if img is not None else y
 
@@ -516,8 +689,8 @@ class SynthesisNetwork(torch.nn.Module):
             out_channels = channels_dict[res]
             use_fp16 = (res >= fp16_resolution)
             is_last = (res == self.img_resolution)
-            block = SynthesisBlock(in_channels, out_channels, w_dim=w_dim, resolution=res,
-                img_channels=img_channels, is_last=is_last, use_fp16=use_fp16, **block_kwargs)
+            block = SynthesisBlock(in_channels, out_channels, resolution=res,
+                img_channels=img_channels, is_last=is_last, use_fp16=use_fp16, **block_kwargs)  #w_dim=w_dim 제거 - style injection 제거
             self.num_ws += block.num_conv
             if is_last:
                 self.num_ws += block.num_torgb
@@ -559,7 +732,7 @@ class Generator(torch.nn.Module):
         self.w_dim = w_dim
         self.img_resolution = img_resolution
         self.img_channels = img_channels
-        self.synthesis = SynthesisNetwork(w_dim=w_dim, img_resolution=img_resolution, img_channels=img_channels, **synthesis_kwargs)
+        self.synthesis = SynthesisNetwork(w_dim=w_dim, img_resolution=img_resolution, img_channels=img_channels, **synthesis_kwargs) 
         self.num_ws = self.synthesis.num_ws
         self.mapping = MappingNetwork(z_dim=z_dim, c_dim=c_dim, w_dim=w_dim, num_ws=self.num_ws, **mapping_kwargs)
 
@@ -568,6 +741,43 @@ class Generator(torch.nn.Module):
         img = self.synthesis(ws, **synthesis_kwargs)
         return img
 
+ 
+# mapping kwargs 제거 위해 추가함 - 작동 안해서 주석 처리
+# @persistence.persistent_class
+# class DummyMapping(torch.nn.Module):
+#     def forward(self, *args, **kwargs):
+#         return None
+# class NoMappingGenerator(torch.nn.Module):
+#     def __init__(self,
+#         z_dim,                      # Input latent (Z) dimensionality.
+#         c_dim,                      # Conditioning label (C) dimensionality. (무시됨)
+#         w_dim,                      # Latent (W) dimensionality == z_dim으로 설정
+#         img_resolution,             # Output image resolution.
+#         img_channels,               # Number of output image channels.
+#         synthesis_kwargs = {},      # Arguments for SynthesisNetwork.
+#     ):
+#         super().__init__()
+#         assert z_dim == w_dim 
+#         self.z_dim = z_dim
+#         self.c_dim = c_dim
+#         self.w_dim = w_dim
+#         self.img_resolution = img_resolution
+#         self.img_channels = img_channels
+
+#         self.synthesis = SynthesisNetwork(
+#             w_dim=w_dim,
+#             img_resolution=img_resolution,
+#             img_channels=img_channels,
+#             **synthesis_kwargs
+#         )
+#         self.num_ws = self.synthesis.num_ws
+#         self.mapping = DummyMapping()
+
+#     def forward(self, z, c=None, **synthesis_kwargs):
+#         # z를 ws로 직접 broadcast (스타일 벡터로 사용)
+#         ws = z.unsqueeze(1).repeat(1, self.num_ws, 1)  # shape: [batch, num_ws, w_dim]
+#         img = self.synthesis(ws, **synthesis_kwargs)
+#         return img, ws
 #----------------------------------------------------------------------------
 
 @persistence.persistent_class
@@ -703,8 +913,8 @@ class DiscriminatorEpilogue(torch.nn.Module):
 
         if architecture == 'skip':
             self.fromrgb = Conv2dLayer(img_channels, in_channels, kernel_size=1, activation=activation)
-        # self.mbstd = MinibatchStdLayer(group_size=mbstd_group_size, num_channels=mbstd_num_channels) if mbstd_num_channels > 0 else None  #minibatch stddev 제거
-        # self.conv = Conv2dLayer(in_channels + mbstd_num_channels, in_channels, kernel_size=3, activation=activation, conv_clamp=conv_clamp) #minibatch stddev 제거
+        # self.mbstd = MinibatchStdLayer(group_size=mbstd_group_size, num_channels=mbstd_num_channels) if mbstd_num_channels > 0 else None
+        # self.conv = Conv2dLayer(in_channels + mbstd_num_channels, in_channels, kernel_size=3, activation=activation, conv_clamp=conv_clamp)
         self.mbstd = None
         self.conv = Conv2dLayer(in_channels, in_channels, kernel_size=3, activation=activation, conv_clamp=conv_clamp)
         self.fc = FullyConnectedLayer(in_channels * (resolution ** 2), in_channels, activation=activation)
@@ -796,4 +1006,21 @@ class Discriminator(torch.nn.Module):
             cmap = self.mapping(None, c)
         x = self.b4(x, img, cmap)
         return x
+    # def forward(self, x, c=None):
+    #     cmap = None
+    #     if self.c_dim > 0:
+    #         cmap = self.mapping(None, c)
+        
+    #     for block in self.blocks.values():
+    #         x = block(x)
+    #         if isinstance(x, tuple):
+    #             x = x[0]  # 추가된 처리
+
+    #     x = self.b4(x)
+    #     if isinstance(x, tuple):
+    #         x = x[0]  # b4도 tuple 반환 가능성
+
+    #     x = self.epilogue(x, cmap)
+    #     return x
+
 #----------------------------------------------------------------------------

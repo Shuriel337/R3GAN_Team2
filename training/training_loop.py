@@ -12,10 +12,10 @@ import copy
 import json
 import pickle
 import psutil
-import PIL.Image
 import numpy as np
 import torch
 import dnnlib
+from PIL import Image
 from torch_utils import misc
 from torch_utils import training_stats
 from torch_utils.ops import conv2d_gradfix
@@ -65,23 +65,66 @@ def setup_snapshot_image_grid(training_set, random_seed=0):
 
 #----------------------------------------------------------------------------
 
-def save_image_grid(img, fname, drange, grid_size):
-    lo, hi = drange
-    img = np.asarray(img, dtype=np.float32)
-    img = (img - lo) * (255 / (hi - lo))
-    img = np.rint(img).clip(0, 255).astype(np.uint8)
+# def save_image_grid(img, fname, drange, grid_size): #style injection 제거
+#     lo, hi = drange
+#     img = np.asarray(img, dtype=np.float32)
+#     img = (img - lo) * (255 / (hi - lo))
+#     img = np.rint(img).clip(0, 255).astype(np.uint8)
 
-    gw, gh = grid_size
-    _N, C, H, W = img.shape
+#     gw, gh = grid_size
+#     _N, C, H, W = img.shape
+#     img = img.reshape(gh, gw, C, H, W)
+#     img = img.transpose(0, 3, 1, 4, 2)
+#     img = img.reshape(gh * H, gw * W, C)
+
+#     assert C in [1, 3]
+#     if C == 1:
+#         PIL.Image.fromarray(img[:, :, 0], 'L').save(fname)
+#     if C == 3:
+#         PIL.Image.fromarray(img, 'RGB').save(fname)
+def save_image_grid(img, fname, drange, grid_size=None):
+    assert img.ndim == 4 or img.ndim == 5  # (N, C, H, W) or (num_groups, N, C, H, W)
+
+    if img.ndim == 5:
+        img = img[0]  # Remove group dimension if present
+
+    #Tensor일 경우만 numpy로 변환
+    if hasattr(img, 'detach'):
+        img = img.detach().cpu().numpy()
+
+    # 정규화 및 uint8 변환
+    img = np.clip((img - drange[0]) * (255 / (drange[1] - drange[0])), 0, 255).astype(np.uint8)
+
+    N, C, H, W = img.shape
+
+    # Grid 사이즈 계산
+    if grid_size is None:
+        gw = int(np.ceil(np.sqrt(N)))
+        gh = int(np.ceil(N / gw))
+    else:
+        gw, gh = grid_size
+
+    total = gw * gh
+
+    # Padding 또는 Trim
+    if N < total:
+        padding = np.zeros((total - N, C, H, W), dtype=img.dtype)
+        img = np.concatenate([img, padding], axis=0)
+    elif N > total:
+        img = img[:total]
+
+    # Reshape and arrange
     img = img.reshape(gh, gw, C, H, W)
-    img = img.transpose(0, 3, 1, 4, 2)
-    img = img.reshape(gh * H, gw * W, C)
+    img = img.transpose(2, 0, 3, 1, 4)
+    img = img.reshape(C, gh * H, gw * W)
 
-    assert C in [1, 3]
+    # HWC 변환
     if C == 1:
-        PIL.Image.fromarray(img[:, :, 0], 'L').save(fname)
-    if C == 3:
-        PIL.Image.fromarray(img, 'RGB').save(fname)
+        img = img[0]
+    else:
+        img = img.transpose(1, 2, 0)
+
+    Image.fromarray(img).save(fname)
 
 #----------------------------------------------------------------------------
 
