@@ -1,4 +1,4 @@
-﻿# Copyright (c) 2021, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2021, NVIDIA CORPORATION.  All rights reserved.
 #
 # NVIDIA CORPORATION and its licensors retain all intellectual property
 # and proprietary rights in and to this software, related documentation
@@ -21,7 +21,7 @@ class Loss:
 #----------------------------------------------------------------------------
 
 class StyleGAN2Loss(Loss):
-    def __init__(self, device, G_mapping, G_synthesis, D, augment_pipe=None, style_mixing_prob=0.9, r1_gamma=10, pl_batch_shrink=2, pl_decay=0.01, pl_weight=2):
+    def __init__(self, device, G_mapping, G_synthesis, D, augment_pipe=None, style_mixing_prob=0, r1_gamma=10, pl_batch_shrink=2, pl_decay=0.01, pl_weight=0):
         super().__init__()
         self.device = device
         self.G_mapping = G_mapping
@@ -43,12 +43,13 @@ class StyleGAN2Loss(Loss):
             ws = self.G_mapping(z, c)
             ws.requires_grad_(True)  # Ensure ws is in autograd graph
 
-            if self.style_mixing_prob > 0:
-                with torch.autograd.profiler.record_function('style_mixing'):
-                    cutoff = torch.empty([], dtype=torch.int64, device=ws.device).random_(1, ws.shape[1])
-                    do_mix = torch.rand([], device=ws.device) < self.style_mixing_prob
-                    new_ws = self.G_mapping(torch.randn_like(z), c, skip_w_avg_update=True)
-                    ws[:, cutoff:] = torch.where(do_mix, new_ws[:, cutoff:], ws[:, cutoff:])
+            # style mixing regularization 제거
+            # if self.style_mixing_prob > 0:
+            #     with torch.autograd.profiler.record_function('style_mixing'):
+            #         cutoff = torch.empty([], dtype=torch.int64, device=ws.device).random_(1, ws.shape[1])
+            #         do_mix = torch.rand([], device=ws.device) < self.style_mixing_prob
+            #         new_ws = self.G_mapping(torch.randn_like(z), c, skip_w_avg_update=True)
+            #         ws[:, cutoff:] = torch.where(do_mix, new_ws[:, cutoff:], ws[:, cutoff:])
 
         with misc.ddp_sync(self.G_synthesis, sync):
             img = self.G_synthesis(ws)
@@ -81,34 +82,34 @@ class StyleGAN2Loss(Loss):
             with torch.autograd.profiler.record_function('Gmain_backward'):
                 loss_Gmain.mean().mul(gain).backward()
 
-        # Gpl: Path length regularization
-        if do_Gpl:
-            with torch.autograd.profiler.record_function('Gpl_forward'):
-                batch_size = gen_z.shape[0] // self.pl_batch_shrink
-                gen_img, gen_ws = self.run_G(gen_z[:batch_size], gen_c[:batch_size], sync=sync)
-                pl_noise = torch.randn_like(gen_img) / np.sqrt(gen_img.shape[2] * gen_img.shape[3])
-                with torch.autograd.profiler.record_function('pl_grads'), conv2d_gradfix.no_weight_gradients():
-                    pl_grads = torch.autograd.grad(
-                        outputs=[(gen_img * pl_noise).sum()],
-                        inputs=[gen_ws],
-                        create_graph=True,
-                        only_inputs=True,
-                        allow_unused=True  
-                    )[0]
+        # Gpl: Path length regularization 제거 
+        # if do_Gpl:
+        #     with torch.autograd.profiler.record_function('Gpl_forward'):
+        #         batch_size = gen_z.shape[0] // self.pl_batch_shrink
+        #         gen_img, gen_ws = self.run_G(gen_z[:batch_size], gen_c[:batch_size], sync=sync)
+        #         pl_noise = torch.randn_like(gen_img) / np.sqrt(gen_img.shape[2] * gen_img.shape[3])
+        #         with torch.autograd.profiler.record_function('pl_grads'), conv2d_gradfix.no_weight_gradients():
+        #             pl_grads = torch.autograd.grad(
+        #                 outputs=[(gen_img * pl_noise).sum()],
+        #                 inputs=[gen_ws],
+        #                 create_graph=True,
+        #                 only_inputs=True,
+        #                 allow_unused=True  
+        #             )[0]
 
-                if pl_grads is not None:
-                    pl_lengths = pl_grads.square().sum(2).mean(1).sqrt()
-                    pl_mean = self.pl_mean.lerp(pl_lengths.mean(), self.pl_decay)
-                    self.pl_mean.copy_(pl_mean.detach())
-                    pl_penalty = (pl_lengths - pl_mean).square()
-                    training_stats.report('Loss/pl_penalty', pl_penalty)
-                    loss_Gpl = pl_penalty * self.pl_weight
-                    training_stats.report('Loss/G/reg', loss_Gpl)
-                    with torch.autograd.profiler.record_function('Gpl_backward'):
-                        (gen_img[:, 0, 0, 0] * 0 + loss_Gpl).mean().mul(gain).backward()
-                else:
-                    #print("Warning: Path length regularization skipped — pl_grads is None.")  #path length regularization이 skip된다는 경고 메시지 출력X 하기 위한 주석
-                    pass
+        #         if pl_grads is not None:
+        #             pl_lengths = pl_grads.square().sum(2).mean(1).sqrt()
+        #             pl_mean = self.pl_mean.lerp(pl_lengths.mean(), self.pl_decay)
+        #             self.pl_mean.copy_(pl_mean.detach())
+        #             pl_penalty = (pl_lengths - pl_mean).square()
+        #             training_stats.report('Loss/pl_penalty', pl_penalty)
+        #             loss_Gpl = pl_penalty * self.pl_weight
+        #             training_stats.report('Loss/G/reg', loss_Gpl)
+        #             with torch.autograd.profiler.record_function('Gpl_backward'):
+        #                 (gen_img[:, 0, 0, 0] * 0 + loss_Gpl).mean().mul(gain).backward()
+        #         else:
+        #             #print("Warning: Path length regularization skipped — pl_grads is None.")  #path length regularization이 skip된다는 경고 메시지 출력X 하기 위한 주석
+        #             pass
 
         # Dmain: Minimize logits for generated images
         loss_Dgen = 0

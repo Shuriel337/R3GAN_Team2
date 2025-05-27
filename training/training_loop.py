@@ -1,4 +1,4 @@
-﻿# Copyright (c) 2021, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2021, NVIDIA CORPORATION.  All rights reserved.
 #
 # NVIDIA CORPORATION and its licensors retain all intellectual property
 # and proprietary rights in and to this software, related documentation
@@ -146,8 +146,8 @@ def training_loop(
     batch_gpu               = 4,        # Number of samples processed at a time by one GPU.
     ema_kimg                = 10,       # Half-life of the exponential moving average (EMA) of generator weights.
     ema_rampup              = None,     # EMA ramp-up coefficient.
-    G_reg_interval          = 4,        # How often to perform regularization for G? None = disable lazy regularization.
-    D_reg_interval          = 16,       # How often to perform regularization for D? None = disable lazy regularization.
+    G_reg_interval          = None,     # How often to perform regularization for G? None = disable lazy regularization.
+    D_reg_interval          = None,     # How often to perform regularization for D? None = disable lazy regularization.
     augment_p               = 0,        # Initial value of augmentation probability.
     ada_target              = None,     # ADA target value. None = fixed p.
     ada_interval            = 4,        # How often to perform ADA adjustment?
